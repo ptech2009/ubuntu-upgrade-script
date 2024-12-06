@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Automatisiertes Upgrade-Skript für Ubuntu Server
+# Automatisiertes Upgrade-Skript für Ubuntu Server mit Sprachwahl (Deutsch oder Englisch)
 #
 # Dieses Skript führt ein vollautomatisiertes Upgrade auf die nächste Ubuntu LTS-Version durch.
 # Optional vorhandene Komponenten:
@@ -17,6 +17,108 @@ LOGFILE="/var/log/ubuntu-lts-upgrade.log"
 BACKUP_DIR="/root/config_backup_$(date +%Y%m%d%H%M%S)"
 ADGUARD_SERVICE_NAME="adguardhome"
 
+#########################
+# Sprachauswahl
+#########################
+
+echo "Please select language / Bitte Sprache wählen:"
+echo "1) English"
+echo "2) Deutsch"
+read -p "Select [1|2]: " lang_choice
+
+if [ "$lang_choice" = "1" ]; then
+    LANGUAGE="en"
+else
+    LANGUAGE="de"
+fi
+
+#########################
+# Sprachvariablen setzen
+#########################
+
+if [ "$LANGUAGE" = "en" ]; then
+    MSG_MUST_BE_ROOT="This script must be run as root!"
+    MSG_CONFIGURE_DPKG="Setting dpkg options for automatic configuration file merges..."
+    MSG_DPKG_DONE="dpkg options successfully set."
+    MSG_BACKUP_CONFIG="Creating backup of current configuration files under:"
+    MSG_BACKUP_DONE="Backup completed."
+    MSG_ADGUARD_FOUND="AdGuard Home container detected. Preparing port 53..."
+    MSG_DISABLE_SYSTEMD_RESOLVED="Disabling systemd-resolved to free up port 53..."
+    MSG_SYSTEMD_RESOLVED_DISABLED="systemd-resolved disabled."
+    MSG_SYSTEMD_ALREADY_DISABLED="systemd-resolved is already disabled."
+    MSG_RESOLV_RECREATE="Creating new /etc/resolv.conf with Cloudflare and Quad9 DNS..."
+    MSG_RESOLV_DONE="/etc/resolv.conf successfully configured."
+    MSG_PORT53_CHECK="Checking port 53..."
+    MSG_PORT53_FORCED="Port 53 is in use. Forcing release."
+    MSG_ADGUARD_RESTART="Restarting AdGuard Home..."
+    MSG_ADGUARD_RESTART_FAIL="ERROR: AdGuard Home could not be restarted!"
+    MSG_ADGUARD_START_FAIL="ERROR: AdGuard Home could not be started!"
+    MSG_ADGUARD_DONE="AdGuard Home successfully (re)activated."
+    MSG_NO_ADGUARD="No AdGuard Home container present. Skipping AdGuard steps."
+    MSG_NO_DOCKER="Docker not installed. Skipping AdGuard steps."
+    MSG_2FA_INSTALLED="2FA package (libpam-google-authenticator) is installed. Ensuring 2FA is enabled..."
+    MSG_2FA_CONFIG="Adding 2FA configuration to /etc/pam.d/sshd..."
+    MSG_2FA_ALREADY="2FA configuration already present."
+    MSG_SSH_RESTART="Restarting SSH service..."
+    MSG_2FA_DONE="2FA successfully verified."
+    MSG_NO_2FA="2FA package not installed. Skipping 2FA configuration."
+    MSG_UPDATES="Performing regular updates..."
+    MSG_UPDATES_DONE="Regular updates completed."
+    MSG_ADGUARD_FIX="Performing AdGuard fixes after the upgrade..."
+    MSG_STOP_SYSTEMD_RESOLVED="Stopping and disabling systemd-resolved..."
+    MSG_RECONF_RESOLV="Reconfiguring /etc/resolv.conf..."
+    MSG_ADGUARD_FIX_DONE="AdGuard Home fixes completed."
+    MSG_NO_ADGUARD_FIX="No AdGuard Home container found. Skipping AdGuard fixes."
+    MSG_RELEASE_UPGRADE="Starting release upgrade to the next LTS version..."
+    MSG_RELEASE_DONE="Release upgrade successfully completed."
+    MSG_RELEASE_FAIL="ERROR: Release upgrade failed. See log for details."
+    MSG_CLEANUP="Cleaning up temporary files..."
+    MSG_CLEANUP_DONE="Cleanup completed."
+    MSG_REBOOT="Upgrade completed. System will reboot in 10 seconds..."
+    MSG_START="Starting fully automated upgrade script for Ubuntu Server..."
+else
+    # Deutsch
+    MSG_MUST_BE_ROOT="Dieses Skript muss als root ausgeführt werden!"
+    MSG_CONFIGURE_DPKG="Setze dpkg-Optionen für automatische Konfigurationsdatei-Merges..."
+    MSG_DPKG_DONE="dpkg-Optionen erfolgreich gesetzt."
+    MSG_BACKUP_CONFIG="Erstelle Backup der aktuellen Konfigurationsdateien unter:"
+    MSG_BACKUP_DONE="Backup abgeschlossen."
+    MSG_ADGUARD_FOUND="AdGuard Home Container erkannt. Bereite Port 53 vor..."
+    MSG_DISABLE_SYSTEMD_RESOLVED="Deaktiviere systemd-resolved, um Port 53 freizugeben..."
+    MSG_SYSTEMD_RESOLVED_DISABLED="systemd-resolved deaktiviert."
+    MSG_SYSTEMD_ALREADY_DISABLED="systemd-resolved ist bereits deaktiviert."
+    MSG_RESOLV_RECREATE="Erstelle neue /etc/resolv.conf mit Cloudflare und Quad9 DNS..."
+    MSG_RESOLV_DONE="/etc/resolv.conf erfolgreich konfiguriert."
+    MSG_PORT53_CHECK="Überprüfe Port 53..."
+    MSG_PORT53_FORCED="Port 53 ist belegt. Erzwinge Freigabe."
+    MSG_ADGUARD_RESTART="Starte AdGuard Home neu..."
+    MSG_ADGUARD_RESTART_FAIL="FEHLER: AdGuard Home konnte nicht neu gestartet werden!"
+    MSG_ADGUARD_START_FAIL="FEHLER: AdGuard Home konnte nicht gestartet werden!"
+    MSG_ADGUARD_DONE="AdGuard Home wurde erfolgreich (re)aktiviert."
+    MSG_NO_ADGUARD="Kein AdGuard Home Container vorhanden. Überspringe AdGuard-spezifische Schritte."
+    MSG_NO_DOCKER="Docker ist nicht installiert. Überspringe AdGuard-spezifische Schritte."
+    MSG_2FA_INSTALLED="2FA-Paket (libpam-google-authenticator) ist installiert. Stelle sicher, dass 2FA aktiviert ist..."
+    MSG_2FA_CONFIG="Füge 2FA-Konfiguration zu /etc/pam.d/sshd hinzu..."
+    MSG_2FA_ALREADY="2FA-Konfiguration ist bereits vorhanden."
+    MSG_SSH_RESTART="Neustart des SSH-Dienstes..."
+    MSG_2FA_DONE="2FA erfolgreich überprüft."
+    MSG_NO_2FA="2FA-Paket nicht installiert. Überspringe 2FA-Konfiguration."
+    MSG_UPDATES="Führe reguläre Updates durch..."
+    MSG_UPDATES_DONE="Reguläre Updates abgeschlossen."
+    MSG_ADGUARD_FIX="Führe AdGuard Fixes nach dem Upgrade durch..."
+    MSG_STOP_SYSTEMD_RESOLVED="Stoppe und deaktiviere systemd-resolved..."
+    MSG_RECONF_RESOLV="Konfiguriere /etc/resolv.conf neu..."
+    MSG_ADGUARD_FIX_DONE="AdGuard Home Fixes abgeschlossen."
+    MSG_NO_ADGUARD_FIX="Kein AdGuard Home Container vorhanden. Überspringe AdGuard-Fixes nach dem Upgrade."
+    MSG_RELEASE_UPGRADE="Starte Release-Upgrade auf die nächste LTS-Version..."
+    MSG_RELEASE_DONE="Release-Upgrade erfolgreich abgeschlossen."
+    MSG_RELEASE_FAIL="FEHLER: Das Release-Upgrade ist fehlgeschlagen. Details siehe Log."
+    MSG_CLEANUP="Bereinige temporäre Dateien..."
+    MSG_CLEANUP_DONE="Bereinigung abgeschlossen."
+    MSG_REBOOT="Upgrade abgeschlossen. Neustart wird in 10 Sekunden durchgeführt..."
+    MSG_START="Starte vollautomatisiertes Upgrade-Skript für Ubuntu Server..."
+fi
+
 # Logging-Funktion
 log() {
     local message="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
@@ -25,164 +127,157 @@ log() {
 
 # Sicherstellen, dass das Skript als root ausgeführt wird
 if [ "$(id -u)" -ne 0 ]; then
-    echo "Dieses Skript muss als root ausgeführt werden!" >&2
+    echo "$MSG_MUST_BE_ROOT" >&2
     exit 1
 fi
 
 # Konfiguration für dpkg setzen (automatisches Merge von Konfigurationsdateien)
 configure_dpkg() {
-    log "Setze dpkg-Optionen für automatische Konfigurationsdatei-Merges..."
+    log "$MSG_CONFIGURE_DPKG"
     echo "force-confdef" > /etc/dpkg/dpkg.cfg.d/99custom
     echo "force-confnew" >> /etc/dpkg/dpkg.cfg.d/99custom
-    log "dpkg-Optionen erfolgreich gesetzt."
+    log "$MSG_DPKG_DONE"
 }
 
 # Sicherung der Konfigurationsdateien
 backup_configs() {
-    log "Erstelle Backup der aktuellen Konfigurationsdateien unter: $BACKUP_DIR"
+    log "$MSG_BACKUP_CONFIG $BACKUP_DIR"
     mkdir -p "$BACKUP_DIR"
     cp -r /etc/* "$BACKUP_DIR/"
-    log "Backup abgeschlossen."
+    log "$MSG_BACKUP_DONE"
 }
 
 # Funktion zur Handhabung von AdGuard Home (optional, nur wenn Docker + Container vorhanden)
 handle_adguard() {
     if command -v docker >/dev/null 2>&1; then
-        # Prüfen ob der AdGuard-Container existiert
         if docker ps -a --format "{{.Names}}" | grep -q "^${ADGUARD_SERVICE_NAME}\$"; then
-            log "AdGuard Home Container erkannt. Bereite Port 53 vor..."
-
-            # Deaktiviere systemd-resolved und entferne Symlinks, falls aktiv
+            log "$MSG_ADGUARD_FOUND"
             if systemctl is-active --quiet systemd-resolved; then
-                log "Deaktiviere systemd-resolved, um Port 53 freizugeben..."
+                log "$MSG_DISABLE_SYSTEMD_RESOLVED"
                 systemctl stop systemd-resolved || true
                 systemctl disable systemd-resolved || true
                 rm -f /etc/systemd/system/dbus-org.freedesktop.resolve1.service
                 rm -f /etc/systemd/system/sysinit.target.wants/systemd-resolved.service
-                log "systemd-resolved deaktiviert."
+                log "$MSG_SYSTEMD_RESOLVED_DISABLED"
             else
-                log "systemd-resolved ist bereits deaktiviert."
+                log "$MSG_SYSTEMD_ALREADY_DISABLED"
             fi
 
-            # resolv.conf neu erstellen
-            log "Erstelle neue /etc/resolv.conf mit Cloudflare und Quad9 DNS..."
+            log "$MSG_RESOLV_RECREATE"
             rm -f /etc/resolv.conf
             echo "nameserver 9.9.9.9" | tee /etc/resolv.conf
             echo "nameserver 1.1.1.1" | tee -a /etc/resolv.conf
-            log "/etc/resolv.conf erfolgreich konfiguriert."
+            log "$MSG_RESOLV_DONE"
 
-            # Port 53 freigeben
-            log "Überprüfe Port 53..."
+            log "$MSG_PORT53_CHECK"
             if lsof -i :53 >/dev/null; then
-                log "Port 53 ist belegt. Erzwinge Freigabe."
+                log "$MSG_PORT53_FORCED"
                 fuser -k 53/tcp || true
                 fuser -k 53/udp || true
             fi
 
-            # AdGuard Home neu starten
-            log "Starte AdGuard Home neu..."
+            log "$MSG_ADGUARD_RESTART"
             if docker ps --format "{{.Names}}" | grep -q "^${ADGUARD_SERVICE_NAME}\$"; then
-                docker restart "$ADGUARD_SERVICE_NAME" || log "FEHLER: AdGuard Home konnte nicht neu gestartet werden!"
+                if ! docker restart "$ADGUARD_SERVICE_NAME" ; then
+                    log "$MSG_ADGUARD_RESTART_FAIL"
+                fi
             else
-                # Falls der Container existiert, aber nicht läuft
-                docker start "$ADGUARD_SERVICE_NAME" || log "FEHLER: AdGuard Home konnte nicht gestartet werden!"
+                if ! docker start "$ADGUARD_SERVICE_NAME" ; then
+                    log "$MSG_ADGUARD_START_FAIL"
+                fi
             fi
-            log "AdGuard Home wurde erfolgreich (re)aktiviert."
+            log "$MSG_ADGUARD_DONE"
         else
-            log "Kein AdGuard Home Container vorhanden. Überspringe AdGuard-spezifische Schritte."
+            log "$MSG_NO_ADGUARD"
         fi
     else
-        log "Docker ist nicht installiert. Überspringe AdGuard-spezifische Schritte."
+        log "$MSG_NO_DOCKER"
     fi
 }
 
 # 2FA sicherstellen (optional, nur wenn libpam-google-authenticator installiert)
 ensure_2fa() {
     if dpkg -l | grep -q libpam-google-authenticator; then
-        log "2FA-Paket (libpam-google-authenticator) ist installiert. Stelle sicher, dass 2FA aktiviert ist..."
+        log "$MSG_2FA_INSTALLED"
         if ! grep -q "pam_google_authenticator.so" /etc/pam.d/sshd; then
-            log "Füge 2FA-Konfiguration zu /etc/pam.d/sshd hinzu..."
+            log "$MSG_2FA_CONFIG"
             echo "auth required pam_google_authenticator.so nullok" >> /etc/pam.d/sshd
             sed -i 's/#ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
             if ! grep -q "AuthenticationMethods publickey,keyboard-interactive" /etc/ssh/sshd_config; then
                 echo "AuthenticationMethods publickey,keyboard-interactive" >> /etc/ssh/sshd_config
             fi
-            log "2FA-Konfiguration erfolgreich aktualisiert."
+            log "$MSG_2FA_DONE"
         else
-            log "2FA-Konfiguration ist bereits vorhanden."
+            log "$MSG_2FA_ALREADY"
         fi
-
-        log "Neustart des SSH-Dienstes..."
+        log "$MSG_SSH_RESTART"
         systemctl restart sshd.service
-        log "2FA erfolgreich überprüft."
+        log "$MSG_2FA_DONE"
     else
-        log "2FA-Paket nicht installiert. Überspringe 2FA-Konfiguration."
+        log "$MSG_NO_2FA"
     fi
 }
 
 # Automatische Updates durchführen
 perform_regular_updates() {
-    log "Führe reguläre Updates durch..."
+    log "$MSG_UPDATES"
     apt-get update -y | tee -a "$LOGFILE"
     apt-get upgrade -y | tee -a "$LOGFILE"
     apt-get dist-upgrade -y | tee -a "$LOGFILE"
     apt-get autoremove -y | tee -a "$LOGFILE"
-    log "Reguläre Updates abgeschlossen."
+    log "$MSG_UPDATES_DONE"
 }
 
 # AdGuard Home nach dem Release-Upgrade reparieren (nur wenn AdGuard existiert)
 fix_adguard_after_upgrade() {
     if command -v docker >/dev/null 2>&1 && docker ps -a --format "{{.Names}}" | grep -q "^${ADGUARD_SERVICE_NAME}\$"; then
-        log "Führe AdGuard Fixes nach dem Upgrade durch..."
-
-        # Deaktiviere systemd-resolved erneut
-        log "Stoppe und deaktiviere systemd-resolved..."
+        log "$MSG_ADGUARD_FIX"
+        log "$MSG_STOP_SYSTEMD_RESOLVED"
         systemctl stop systemd-resolved || true
         systemctl disable systemd-resolved || true
 
-        # resolv.conf neu konfigurieren
-        log "Konfiguriere /etc/resolv.conf neu..."
+        log "$MSG_RECONF_RESOLV"
         rm -f /etc/resolv.conf
         echo "nameserver 9.9.9.9" | tee /etc/resolv.conf
         echo "nameserver 1.1.1.1" | tee -a /etc/resolv.conf
-        log "/etc/resolv.conf erfolgreich konfiguriert."
+        log "$MSG_RESOLV_DONE"
 
-        log "AdGuard Home Fixes abgeschlossen."
+        log "$MSG_ADGUARD_FIX_DONE"
     else
-        log "Kein AdGuard Home Container vorhanden. Überspringe AdGuard-Fixes nach dem Upgrade."
+        log "$MSG_NO_ADGUARD_FIX"
     fi
 }
 
 # Release-Upgrade durchführen
 perform_release_upgrade() {
-    log "Starte Release-Upgrade auf die nächste LTS-Version..."
+    log "$MSG_RELEASE_UPGRADE"
     do-release-upgrade -f DistUpgradeViewNonInteractive | tee -a "$LOGFILE"
     if [ $? -eq 0 ]; then
-        log "Release-Upgrade erfolgreich abgeschlossen."
+        log "$MSG_RELEASE_DONE"
     else
-        log "FEHLER: Das Release-Upgrade ist fehlgeschlagen. Details siehe $LOGFILE."
+        log "$MSG_RELEASE_FAIL"
         exit 1
     fi
 }
 
 # Bereinige temporäre Dateien
 cleanup() {
-    log "Bereinige temporäre Dateien..."
+    log "$MSG_CLEANUP"
     apt-get clean
     rm -rf /var/lib/apt/lists/*
-    log "Bereinigung abgeschlossen."
+    log "$MSG_CLEANUP_DONE"
 }
 
 # Neustarten des Systems
 perform_reboot() {
-    log "Upgrade abgeschlossen. Neustart wird in 10 Sekunden durchgeführt..."
+    log "$MSG_REBOOT"
     sleep 10
     reboot
 }
 
 # Hauptablauf
 main() {
-    log "Starte vollautomatisiertes Upgrade-Skript für Ubuntu Server..."
+    log "$MSG_START"
     configure_dpkg
     backup_configs
     handle_adguard
@@ -195,4 +290,3 @@ main() {
 }
 
 main
-
