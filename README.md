@@ -1,7 +1,5 @@
-# ubuntu-upgrade-script
+# Ubuntu-upgrade-script
 A script to streamline and automate the upgrade process of Ubuntu systems.
-
-# Ubuntu LTS Upgrade Script
 
 This script performs a fully automated upgrade of an Ubuntu server to the next LTS version without requiring manual interaction. It is designed for administrators who wish to streamline and simplify their upgrade process. Key features include:
 
