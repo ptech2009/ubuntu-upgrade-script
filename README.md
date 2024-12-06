@@ -50,6 +50,11 @@ The script is modular and can be easily adjusted. If you prefer not to disable s
 Disclaimer
 
 Use this script at your own risk. It is highly recommended to perform a full system backup before initiating the upgrade.
+
+✉️ Contact
+
+For questions or suggestions, feel free to open a GitHub Issue or send an email to ptech09@schumacher.or.at.
+
 License
 
 This project is licensed under the MIT License. Please refer to the LICENSE file for more details.
