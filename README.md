@@ -58,3 +58,65 @@ For questions or suggestions, feel free to open a GitHub Issue or send an email 
 License
 
 This project is licensed under the MIT License. Please refer to the LICENSE file for more details.
+
+
+
+# Ubuntu LTS Upgrade Skript
+
+Dieses Skript führt ein vollautomatisiertes Upgrade eines Ubuntu-Servers auf die nächste LTS-Version durch, ohne dass manuelle Eingriffe erforderlich sind. Es richtet sich an Administratoren, die ihren Upgrade-Prozess vereinfachen und standardisieren möchten. Wesentliche Funktionen sind:
+
+- Erstellen eines vollständigen Backups des `/etc`-Verzeichnisses.
+- Konfiguration von `dpkg` für das automatische Zusammenführen von Konfigurationsdateien.
+- Ausführen umfangreicher System-Updates (`apt-get update`, `upgrade`, `dist-upgrade`, `autoremove`).
+- Durchführung des Release-Upgrades auf die nächste Ubuntu LTS-Version mittels `do-release-upgrade`.
+- Bereinigung temporärer Dateien nach dem Upgrade.
+- Automatischer Neustart des Systems nach Abschluss.
+
+Das Skript erkennt optional vorhandene Komponenten und passt das Vorgehen entsprechend an:
+
+- **AdGuard Home auf Port 53:**  
+  Ist ein Docker-Container mit dem Namen `adguardhome` vorhanden, sorgt das Skript dafür, dass Port 53 freigegeben, `systemd-resolved` deaktiviert und AdGuard Home nach dem Upgrade neu gestartet wird.
+
+- **2FA mit Google Authenticator:**  
+  Ist das Paket `libpam-google-authenticator` installiert, stellt das Skript sicher, dass die Zwei-Faktor-Authentifizierung für SSH korrekt eingerichtet ist.
+
+Andere Docker-Container (z. B. Nextcloud, Vaultwarden, Portainer) werden nicht verändert und bleiben von den Aktionen des Skripts unberührt.
+
+## Voraussetzungen
+
+- Ein Ubuntu LTS-Server (z. B. Ubuntu 20.04), der auf die nächste LTS-Version (z. B. 22.04) aktualisiert werden kann.
+- `do-release-upgrade` sollte verfügbar sein (in der Regel im Paket `ubuntu-release-upgrader-core` enthalten).
+- Das Skript muss als `root` ausgeführt werden.
+
+## Verwendung
+
+1. Skript herunterladen oder lokal erstellen:
+   ```bash
+   wget https://raw.githubusercontent.com/dein-benutzername/dein-repo/main/upgrade-script.sh
+   chmod +x upgrade-script.sh
+
+    Als root ausführen:
+
+    sudo ./upgrade-script.sh
+
+    Das Skript führt alle erforderlichen Schritte automatisch durch. Kein weiterer Eingriff ist nötig.
+
+Logging & Fehlersuche
+
+    Alle Aktionen werden in /var/log/ubuntu-lts-upgrade.log protokolliert.
+    Im Fehlerfall oder bei Problemen kann diese Logdatei zur Fehlersuche herangezogen werden.
+
+Anpassungen
+
+Das Skript ist modular aufgebaut und kann leicht angepasst werden. Wenn Du z. B. systemd-resolved nicht deaktivieren oder keine 2FA einrichten möchtest, kannst Du die entsprechenden Abschnitte auskommentieren oder entfernen. Überprüfe die Funktionsblöcke, um das Skript an Deine Umgebung anzupassen.
+Haftungsausschluss
+
+Die Verwendung des Skripts erfolgt auf eigene Gefahr. Es wird dringend empfohlen, vor dem Upgrade ein vollständiges Backup des Systems anzufertigen.
+
+✉️ Kontakt
+
+Bei Fragen oder Anregungen kannst Du gerne ein GitHub Issue eröffnen oder eine E-Mail an ptech09@schumacher.or.at senden.
+
+Lizenz
+
+Dieses Projekt steht unter der MIT-Lizenz. Weitere Informationen findest Du in der LICENSE-Datei.
