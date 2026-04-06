@@ -1,292 +1,754 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Automatisiertes Upgrade-Skript für Ubuntu Server mit Sprachwahl (Deutsch oder Englisch)
+set -Eeuo pipefail
+umask 077
+
+###############################################################################
+# safe-ubuntu-lts-upgrade-unattended.sh
 #
-# Dieses Skript führt ein vollautomatisiertes Upgrade auf die nächste Ubuntu LTS-Version durch.
-# Optional vorhandene Komponenten:
-# - AdGuard Home in Docker (Containername: adguardhome)
-# - 2FA via libpam-google-authenticator
+# Best-effort unattended Ubuntu LTS release upgrade
 #
-# Wenn Docker oder AdGuard Home nicht vorhanden sind, werden die entsprechenden Schritte übersprungen.
-# Wenn 2FA-Paket nicht vorhanden ist, wird ebenfalls übersprungen.
-#
-# Voraussetzung: Ubuntu LTS Server
+# Wichtige Eigenschaften:
+# - beantwortet Standard-Prompts automatisch
+# - nutzt do-release-upgrade
+# - bricht bei bekannten Risikofällen bewusst ab
+# - kein blindes "yes | ..."
+###############################################################################
 
-export DEBIAN_FRONTEND=noninteractive
-LOGFILE="/var/log/ubuntu-lts-upgrade.log"
-BACKUP_DIR="/root/config_backup_$(date +%Y%m%d%H%M%S)"
-ADGUARD_SERVICE_NAME="adguardhome"
+TARGET_LTS="${TARGET_LTS:-26.04}"
+PROMPT_MODE="${PROMPT_MODE:-lts}"                        # lts | normal
+ALLOW_DEVEL_UPGRADE="${ALLOW_DEVEL_UPGRADE:-no}"        # yes | no
+UNATTENDED_MODE="${UNATTENDED_MODE:-yes}"               # yes | no
+AUTO_CONFIRM="${AUTO_CONFIRM:-yes}"                     # yes | no
+AUTO_REBOOT="${AUTO_REBOOT:-no}"                        # yes | no
+ASK_REBOOT="${ASK_REBOOT:-no}"                          # yes | no
 
-#########################
-# Sprachauswahl
-#########################
+ALLOW_THIRD_PARTY="${ALLOW_THIRD_PARTY:-no}"            # yes | no
+ALLOW_SPECIAL_CASES="${ALLOW_SPECIAL_CASES:-no}"        # yes | no
 
-echo "Please select language / Bitte Sprache wählen:"
-echo "1) English"
-echo "2) Deutsch"
-read -p "Select [1|2]: " lang_choice
+MANAGE_ADGUARD_DNS="${MANAGE_ADGUARD_DNS:-no}"          # yes | no
+ADGUARD_CONTAINER_NAME="${ADGUARD_CONTAINER_NAME:-adguardhome}"
 
-if [ "$lang_choice" = "1" ]; then
-    LANGUAGE="en"
-else
-    LANGUAGE="de"
-fi
+MIN_ROOT_FREE_GB="${MIN_ROOT_FREE_GB:-6}"
+MIN_BOOT_FREE_MB="${MIN_BOOT_FREE_MB:-200}"
 
-#########################
-# Sprachvariablen setzen
-#########################
+LOGFILE="${LOGFILE:-/var/log/ubuntu-lts-upgrade.log}"
+BACKUP_DIR="${BACKUP_DIR:-/root/ubuntu_upgrade_backup_$(date +%Y%m%d_%H%M%S)}"
+TRANSCRIPT_FILE="$BACKUP_DIR/do-release-upgrade.session.log"
+CHECK_RELEASE_FILE="$BACKUP_DIR/check-new-release.txt"
 
-if [ "$LANGUAGE" = "en" ]; then
-    MSG_MUST_BE_ROOT="This script must be run as root!"
-    MSG_CONFIGURE_DPKG="Setting dpkg options for automatic configuration file merges..."
-    MSG_DPKG_DONE="dpkg options successfully set."
-    MSG_BACKUP_CONFIG="Creating backup of current configuration files under:"
-    MSG_BACKUP_DONE="Backup completed."
-    MSG_ADGUARD_FOUND="AdGuard Home container detected. Preparing port 53..."
-    MSG_DISABLE_SYSTEMD_RESOLVED="Disabling systemd-resolved to free up port 53..."
-    MSG_SYSTEMD_RESOLVED_DISABLED="systemd-resolved disabled."
-    MSG_SYSTEMD_ALREADY_DISABLED="systemd-resolved is already disabled."
-    MSG_RESOLV_RECREATE="Creating new /etc/resolv.conf with Cloudflare and Quad9 DNS..."
-    MSG_RESOLV_DONE="/etc/resolv.conf successfully configured."
-    MSG_PORT53_CHECK="Checking port 53..."
-    MSG_PORT53_FORCED="Port 53 is in use. Forcing release."
-    MSG_ADGUARD_RESTART="Restarting AdGuard Home..."
-    MSG_ADGUARD_RESTART_FAIL="ERROR: AdGuard Home could not be restarted!"
-    MSG_ADGUARD_START_FAIL="ERROR: AdGuard Home could not be started!"
-    MSG_ADGUARD_DONE="AdGuard Home successfully (re)activated."
-    MSG_NO_ADGUARD="No AdGuard Home container present. Skipping AdGuard steps."
-    MSG_NO_DOCKER="Docker not installed. Skipping AdGuard steps."
-    MSG_2FA_INSTALLED="2FA package (libpam-google-authenticator) is installed. Ensuring 2FA is enabled..."
-    MSG_2FA_CONFIG="Adding 2FA configuration to /etc/pam.d/sshd..."
-    MSG_2FA_ALREADY="2FA configuration already present."
-    MSG_SSH_RESTART="Restarting SSH service..."
-    MSG_2FA_DONE="2FA successfully verified."
-    MSG_NO_2FA="2FA package not installed. Skipping 2FA configuration."
-    MSG_UPDATES="Performing regular updates..."
-    MSG_UPDATES_DONE="Regular updates completed."
-    MSG_ADGUARD_FIX="Performing AdGuard fixes after the upgrade..."
-    MSG_STOP_SYSTEMD_RESOLVED="Stopping and disabling systemd-resolved..."
-    MSG_RECONF_RESOLV="Reconfiguring /etc/resolv.conf..."
-    MSG_ADGUARD_FIX_DONE="AdGuard Home fixes completed."
-    MSG_NO_ADGUARD_FIX="No AdGuard Home container found. Skipping AdGuard fixes."
-    MSG_RELEASE_UPGRADE="Starting release upgrade to the next LTS version..."
-    MSG_RELEASE_DONE="Release upgrade successfully completed."
-    MSG_RELEASE_FAIL="ERROR: Release upgrade failed. See log for details."
-    MSG_CLEANUP="Cleaning up temporary files..."
-    MSG_CLEANUP_DONE="Cleanup completed."
-    MSG_REBOOT="Upgrade completed. System will reboot in 10 seconds..."
-    MSG_START="Starting fully automated upgrade script for Ubuntu Server..."
-else
-    # Deutsch
-    MSG_MUST_BE_ROOT="Dieses Skript muss als root ausgeführt werden!"
-    MSG_CONFIGURE_DPKG="Setze dpkg-Optionen für automatische Konfigurationsdatei-Merges..."
-    MSG_DPKG_DONE="dpkg-Optionen erfolgreich gesetzt."
-    MSG_BACKUP_CONFIG="Erstelle Backup der aktuellen Konfigurationsdateien unter:"
-    MSG_BACKUP_DONE="Backup abgeschlossen."
-    MSG_ADGUARD_FOUND="AdGuard Home Container erkannt. Bereite Port 53 vor..."
-    MSG_DISABLE_SYSTEMD_RESOLVED="Deaktiviere systemd-resolved, um Port 53 freizugeben..."
-    MSG_SYSTEMD_RESOLVED_DISABLED="systemd-resolved deaktiviert."
-    MSG_SYSTEMD_ALREADY_DISABLED="systemd-resolved ist bereits deaktiviert."
-    MSG_RESOLV_RECREATE="Erstelle neue /etc/resolv.conf mit Cloudflare und Quad9 DNS..."
-    MSG_RESOLV_DONE="/etc/resolv.conf erfolgreich konfiguriert."
-    MSG_PORT53_CHECK="Überprüfe Port 53..."
-    MSG_PORT53_FORCED="Port 53 ist belegt. Erzwinge Freigabe."
-    MSG_ADGUARD_RESTART="Starte AdGuard Home neu..."
-    MSG_ADGUARD_RESTART_FAIL="FEHLER: AdGuard Home konnte nicht neu gestartet werden!"
-    MSG_ADGUARD_START_FAIL="FEHLER: AdGuard Home konnte nicht gestartet werden!"
-    MSG_ADGUARD_DONE="AdGuard Home wurde erfolgreich (re)aktiviert."
-    MSG_NO_ADGUARD="Kein AdGuard Home Container vorhanden. Überspringe AdGuard-spezifische Schritte."
-    MSG_NO_DOCKER="Docker ist nicht installiert. Überspringe AdGuard-spezifische Schritte."
-    MSG_2FA_INSTALLED="2FA-Paket (libpam-google-authenticator) ist installiert. Stelle sicher, dass 2FA aktiviert ist..."
-    MSG_2FA_CONFIG="Füge 2FA-Konfiguration zu /etc/pam.d/sshd hinzu..."
-    MSG_2FA_ALREADY="2FA-Konfiguration ist bereits vorhanden."
-    MSG_SSH_RESTART="Neustart des SSH-Dienstes..."
-    MSG_2FA_DONE="2FA erfolgreich überprüft."
-    MSG_NO_2FA="2FA-Paket nicht installiert. Überspringe 2FA-Konfiguration."
-    MSG_UPDATES="Führe reguläre Updates durch..."
-    MSG_UPDATES_DONE="Reguläre Updates abgeschlossen."
-    MSG_ADGUARD_FIX="Führe AdGuard Fixes nach dem Upgrade durch..."
-    MSG_STOP_SYSTEMD_RESOLVED="Stoppe und deaktiviere systemd-resolved..."
-    MSG_RECONF_RESOLV="Konfiguriere /etc/resolv.conf neu..."
-    MSG_ADGUARD_FIX_DONE="AdGuard Home Fixes abgeschlossen."
-    MSG_NO_ADGUARD_FIX="Kein AdGuard Home Container vorhanden. Überspringe AdGuard-Fixes nach dem Upgrade."
-    MSG_RELEASE_UPGRADE="Starte Release-Upgrade auf die nächste LTS-Version..."
-    MSG_RELEASE_DONE="Release-Upgrade erfolgreich abgeschlossen."
-    MSG_RELEASE_FAIL="FEHLER: Das Release-Upgrade ist fehlgeschlagen. Details siehe Log."
-    MSG_CLEANUP="Bereinige temporäre Dateien..."
-    MSG_CLEANUP_DONE="Bereinigung abgeschlossen."
-    MSG_REBOOT="Upgrade abgeschlossen. Neustart wird in 10 Sekunden durchgeführt..."
-    MSG_START="Starte vollautomatisiertes Upgrade-Skript für Ubuntu Server..."
-fi
+TEMP_APT_CONF="/etc/apt/apt.conf.d/99zzz-safe-release-upgrade-unattended"
+TEMP_NEEDRESTART_CONF="/etc/needrestart/conf.d/99zzz-safe-release-upgrade.conf"
 
-# Logging-Funktion
+LANGUAGE="${LANGUAGE:-de}"
+LANGUAGE_CHOICE="${LANGUAGE_CHOICE:-}"
+LOG_READY=0
+
+###############################################################################
+# Sprache
+###############################################################################
+
+is_tty() {
+    [[ -t 0 && -t 1 ]]
+}
+
+choose_language() {
+    local choice="${LANGUAGE_CHOICE}"
+
+    if [[ -n "$choice" ]]; then
+        :
+    elif is_tty; then
+        echo "Please select language / Bitte Sprache wählen:"
+        echo "1) English"
+        echo "2) Deutsch"
+        read -r -p "Select [1|2] (default: 2): " choice || true
+    else
+        choice="2"
+    fi
+
+    case "${choice:-2}" in
+        1|en|EN|english|English) LANGUAGE="en" ;;
+        *) LANGUAGE="de" ;;
+    esac
+}
+
+msg() {
+    local key="$1"
+    case "$LANGUAGE:$key" in
+        en:must_be_root) echo "This script must be run as root." ;;
+        de:must_be_root) echo "Dieses Skript muss als root ausgeführt werden." ;;
+
+        en:start) echo "Starting safe unattended Ubuntu LTS upgrade..." ;;
+        de:start) echo "Starte sicheres unbeaufsichtigtes Ubuntu-LTS-Upgrade ..." ;;
+
+        en:warn) echo "WARNING" ;;
+        de:warn) echo "WARNUNG" ;;
+
+        en:error) echo "ERROR" ;;
+        de:error) echo "FEHLER" ;;
+
+        en:preflight) echo "Running preflight checks..." ;;
+        de:preflight) echo "Führe Vorprüfungen aus ..." ;;
+
+        en:regular_updates) echo "Installing all pending package updates..." ;;
+        de:regular_updates) echo "Installiere alle ausstehenden Paketupdates ..." ;;
+
+        en:release_check) echo "Checking whether the target release is officially offered..." ;;
+        de:release_check) echo "Prüfe, ob das Zielrelease offiziell angeboten wird ..." ;;
+
+        en:release_start) echo "Starting release upgrade in unattended mode..." ;;
+        de:release_start) echo "Starte Release-Upgrade im unbeaufsichtigten Modus ..." ;;
+
+        en:release_ok) echo "Release upgrade completed successfully." ;;
+        de:release_ok) echo "Release-Upgrade erfolgreich abgeschlossen." ;;
+
+        en:need_reboot_after_updates) echo "A reboot is required before the release upgrade. Reboot and run the script again." ;;
+        de:need_reboot_after_updates) echo "Vor dem Release-Upgrade ist ein Neustart erforderlich. Bitte neu starten und das Skript erneut ausführen." ;;
+
+        en:not_ubuntu) echo "This script supports Ubuntu only." ;;
+        de:not_ubuntu) echo "Dieses Skript unterstützt nur Ubuntu." ;;
+
+        en:not_lts) echo "The current system is not an LTS release." ;;
+        de:not_lts) echo "Das aktuelle System ist keine LTS-Version." ;;
+
+        en:no_offer) echo "No suitable target release is currently offered through do-release-upgrade." ;;
+        de:no_offer) echo "Aktuell wird über do-release-upgrade kein passendes Zielrelease angeboten." ;;
+
+        en:noninteractive_confirm_fail) echo "No interactive TTY available and AUTO_CONFIRM is not yes." ;;
+        de:noninteractive_confirm_fail) echo "Keine interaktive TTY verfügbar und AUTO_CONFIRM ist nicht auf yes gesetzt." ;;
+
+        en:third_party_found) echo "Third-party repositories detected." ;;
+        de:third_party_found) echo "Drittanbieter-Repositories erkannt." ;;
+
+        en:adguard_skip) echo "AdGuard/DNS management is disabled." ;;
+        de:adguard_skip) echo "AdGuard-/DNS-Verwaltung ist deaktiviert." ;;
+
+        en:reboot_prompt) echo "Reboot system now?" ;;
+        de:reboot_prompt) echo "System jetzt neu starten?" ;;
+
+        *) echo "$key" ;;
+    esac
+}
+
+###############################################################################
+# Logging / Fehlerbehandlung
+###############################################################################
+
+init_logging() {
+    mkdir -p "$(dirname "$LOGFILE")"
+    touch "$LOGFILE"
+    chmod 600 "$LOGFILE"
+    LOG_READY=1
+}
+
 log() {
-    local message="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-    echo "$message" | tee -a "$LOGFILE"
+    local level="$1"
+    shift
+    local ts
+    ts="$(date '+%Y-%m-%d %H:%M:%S')"
+
+    if [[ "${LOG_READY:-0}" -eq 1 ]]; then
+        printf '[%s] [%s] %s\n' "$ts" "$level" "$*" | tee -a "$LOGFILE"
+    else
+        printf '[%s] [%s] %s\n' "$ts" "$level" "$*" >&2
+    fi
 }
 
-# Sicherstellen, dass das Skript als root ausgeführt wird
-if [ "$(id -u)" -ne 0 ]; then
-    echo "$MSG_MUST_BE_ROOT" >&2
+info()  { log INFO "$*"; }
+warn()  { log "$(msg warn)" "$*"; }
+error() { log "$(msg error)" "$*"; }
+
+die() {
+    error "$*"
     exit 1
-fi
-
-# Konfiguration für dpkg setzen (automatisches Merge von Konfigurationsdateien)
-configure_dpkg() {
-    log "$MSG_CONFIGURE_DPKG"
-    echo "force-confdef" > /etc/dpkg/dpkg.cfg.d/99custom
-    echo "force-confnew" >> /etc/dpkg/dpkg.cfg.d/99custom
-    log "$MSG_DPKG_DONE"
 }
 
-# Sicherung der Konfigurationsdateien
-backup_configs() {
-    log "$MSG_BACKUP_CONFIG $BACKUP_DIR"
-    mkdir -p "$BACKUP_DIR"
-    cp -r /etc/* "$BACKUP_DIR/"
-    log "$MSG_BACKUP_DONE"
+on_error() {
+    local exit_code="$1"
+    local line_no="$2"
+    local cmd="$3"
+    error "Abbruch in Zeile $line_no bei Befehl: $cmd (Exit-Code: $exit_code)"
+    [[ "${LOG_READY:-0}" -eq 1 ]] && error "Details siehe: $LOGFILE"
+    exit "$exit_code"
 }
 
-# Funktion zur Handhabung von AdGuard Home (optional, nur wenn Docker + Container vorhanden)
-handle_adguard() {
-    if command -v docker >/dev/null 2>&1; then
-        if docker ps -a --format "{{.Names}}" | grep -q "^${ADGUARD_SERVICE_NAME}\$"; then
-            log "$MSG_ADGUARD_FOUND"
-            if systemctl is-active --quiet systemd-resolved; then
-                log "$MSG_DISABLE_SYSTEMD_RESOLVED"
-                systemctl stop systemd-resolved || true
-                systemctl disable systemd-resolved || true
-                rm -f /etc/systemd/system/dbus-org.freedesktop.resolve1.service
-                rm -f /etc/systemd/system/sysinit.target.wants/systemd-resolved.service
-                log "$MSG_SYSTEMD_RESOLVED_DISABLED"
-            else
-                log "$MSG_SYSTEMD_ALREADY_DISABLED"
-            fi
-
-            log "$MSG_RESOLV_RECREATE"
-            rm -f /etc/resolv.conf
-            echo "nameserver 9.9.9.9" | tee /etc/resolv.conf
-            echo "nameserver 1.1.1.1" | tee -a /etc/resolv.conf
-            log "$MSG_RESOLV_DONE"
-
-            log "$MSG_PORT53_CHECK"
-            if lsof -i :53 >/dev/null; then
-                log "$MSG_PORT53_FORCED"
-                fuser -k 53/tcp || true
-                fuser -k 53/udp || true
-            fi
-
-            log "$MSG_ADGUARD_RESTART"
-            if docker ps --format "{{.Names}}" | grep -q "^${ADGUARD_SERVICE_NAME}\$"; then
-                if ! docker restart "$ADGUARD_SERVICE_NAME" ; then
-                    log "$MSG_ADGUARD_RESTART_FAIL"
-                fi
-            else
-                if ! docker start "$ADGUARD_SERVICE_NAME" ; then
-                    log "$MSG_ADGUARD_START_FAIL"
-                fi
-            fi
-            log "$MSG_ADGUARD_DONE"
-        else
-            log "$MSG_NO_ADGUARD"
-        fi
-    else
-        log "$MSG_NO_DOCKER"
-    fi
+cleanup_temp_files() {
+    rm -f "$TEMP_APT_CONF" "$TEMP_NEEDRESTART_CONF" || true
 }
 
-# 2FA sicherstellen (optional, nur wenn libpam-google-authenticator installiert)
-ensure_2fa() {
-    if dpkg -l | grep -q libpam-google-authenticator; then
-        log "$MSG_2FA_INSTALLED"
-        if ! grep -q "pam_google_authenticator.so" /etc/pam.d/sshd; then
-            log "$MSG_2FA_CONFIG"
-            echo "auth required pam_google_authenticator.so nullok" >> /etc/pam.d/sshd
-            sed -i 's/#ChallengeResponseAuthentication.*/ChallengeResponseAuthentication yes/' /etc/ssh/sshd_config
-            if ! grep -q "AuthenticationMethods publickey,keyboard-interactive" /etc/ssh/sshd_config; then
-                echo "AuthenticationMethods publickey,keyboard-interactive" >> /etc/ssh/sshd_config
-            fi
-            log "$MSG_2FA_DONE"
-        else
-            log "$MSG_2FA_ALREADY"
-        fi
-        log "$MSG_SSH_RESTART"
-        systemctl restart sshd.service
-        log "$MSG_2FA_DONE"
-    else
-        log "$MSG_NO_2FA"
-    fi
-}
+trap cleanup_temp_files EXIT
+trap 'on_error $? ${LINENO} "${BASH_COMMAND}"' ERR
 
-# Automatische Updates durchführen
-perform_regular_updates() {
-    log "$MSG_UPDATES"
-    apt-get update -y | tee -a "$LOGFILE"
-    apt-get upgrade -y | tee -a "$LOGFILE"
-    apt-get dist-upgrade -y | tee -a "$LOGFILE"
-    apt-get autoremove -y | tee -a "$LOGFILE"
-    log "$MSG_UPDATES_DONE"
-}
+###############################################################################
+# Hilfsfunktionen
+###############################################################################
 
-# AdGuard Home nach dem Release-Upgrade reparieren (nur wenn AdGuard existiert)
-fix_adguard_after_upgrade() {
-    if command -v docker >/dev/null 2>&1 && docker ps -a --format "{{.Names}}" | grep -q "^${ADGUARD_SERVICE_NAME}\$"; then
-        log "$MSG_ADGUARD_FIX"
-        log "$MSG_STOP_SYSTEMD_RESOLVED"
-        systemctl stop systemd-resolved || true
-        systemctl disable systemd-resolved || true
-
-        log "$MSG_RECONF_RESOLV"
-        rm -f /etc/resolv.conf
-        echo "nameserver 9.9.9.9" | tee /etc/resolv.conf
-        echo "nameserver 1.1.1.1" | tee -a /etc/resolv.conf
-        log "$MSG_RESOLV_DONE"
-
-        log "$MSG_ADGUARD_FIX_DONE"
-    else
-        log "$MSG_NO_ADGUARD_FIX"
-    fi
-}
-
-# Release-Upgrade durchführen
-perform_release_upgrade() {
-    log "$MSG_RELEASE_UPGRADE"
-    do-release-upgrade -f DistUpgradeViewNonInteractive | tee -a "$LOGFILE"
-    if [ $? -eq 0 ]; then
-        log "$MSG_RELEASE_DONE"
-    else
-        log "$MSG_RELEASE_FAIL"
+require_root() {
+    if [[ "$(id -u)" -ne 0 ]]; then
+        echo "$(msg must_be_root)" >&2
         exit 1
     fi
 }
 
-# Bereinige temporäre Dateien
-cleanup() {
-    log "$MSG_CLEANUP"
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+package_installed() {
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
+version_ge() {
+    dpkg --compare-versions "$1" ge "$2"
+}
+
+version_lt() {
+    dpkg --compare-versions "$1" lt "$2"
+}
+
+get_os_value() {
+    local key="$1"
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    printf '%s' "${!key:-}"
+}
+
+confirm_or_die() {
+    local question="$1"
+    local answer
+
+    if [[ "$AUTO_CONFIRM" == "yes" ]]; then
+        info "AUTO_CONFIRM=yes gesetzt, bestätige automatisch: $question"
+        return 0
+    fi
+
+    if ! is_tty; then
+        die "$(msg noninteractive_confirm_fail)"
+    fi
+
+    while true; do
+        read -r -p "$question [ja/nein]: " answer || true
+        case "${answer,,}" in
+            ja|j|yes|y) return 0 ;;
+            nein|n|no) return 1 ;;
+        esac
+    done
+}
+
+ask_yes_no_default_no() {
+    local question="$1"
+    local answer
+
+    if ! is_tty; then
+        return 1
+    fi
+
+    while true; do
+        read -r -p "$question [ja/nein] (default: nein): " answer || true
+        case "${answer,,}" in
+            ""|nein|n|no) return 1 ;;
+            ja|j|yes|y) return 0 ;;
+        esac
+    done
+}
+
+###############################################################################
+# Vorbereitung
+###############################################################################
+
+ensure_required_packages() {
+    local pkgs=()
+
+    command_exists do-release-upgrade || pkgs+=(update-manager-core)
+    command_exists rsync || pkgs+=(rsync)
+    command_exists lsb_release || pkgs+=(lsb-release)
+    command_exists script || pkgs+=(util-linux)
+    command_exists debconf-set-selections || pkgs+=(debconf-utils)
+
+    if (( ${#pkgs[@]} > 0 )); then
+        info "Installiere fehlende Hilfspakete: ${pkgs[*]}"
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get update -y
+        apt-get install -y "${pkgs[@]}"
+        unset DEBIAN_FRONTEND || true
+    fi
+}
+
+configure_unattended_mode() {
+    if [[ "$UNATTENDED_MODE" != "yes" ]]; then
+        info "UNATTENDED_MODE=no gesetzt."
+        return 0
+    fi
+
+    info "Konfiguriere automatische Antwortlogik für Standard-Prompts ..."
+
+    export DEBIAN_FRONTEND=noninteractive
+    export DEBCONF_NONINTERACTIVE_SEEN=true
+    export NEEDRESTART_MODE=a
+    export APT_LISTCHANGES_FRONTEND=none
+
+    cat > "$TEMP_APT_CONF" <<'INNEREOF1'
+Dpkg::Options {
+  "--force-confdef";
+  "--force-confold";
+};
+APT::Get::Assume-Yes "true";
+quiet "1";
+INNEREOF1
+
+    mkdir -p "$(dirname "$TEMP_NEEDRESTART_CONF")"
+    cat > "$TEMP_NEEDRESTART_CONF" <<'INNEREOF2'
+$nrconf{restart} = 'a';
+INNEREOF2
+
+    if command_exists debconf-set-selections; then
+        printf '%s\n' \
+            'libc6 libraries/restart-without-asking boolean true' \
+            | debconf-set-selections || true
+    fi
+
+    AUTO_CONFIRM="yes"
+    ASK_REBOOT="no"
+}
+
+create_backup_dir() {
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+    info "Erstelle Backup unter $BACKUP_DIR"
+}
+
+backup_configs() {
+    info "Sichere /etc, APT-Quellen, SSH-Konfiguration und Zustandsdaten ..."
+    mkdir -p \
+        "$BACKUP_DIR/etc" \
+        "$BACKUP_DIR/apt" \
+        "$BACKUP_DIR/ssh" \
+        "$BACKUP_DIR/state" \
+        "$BACKUP_DIR/dns"
+
+    if command_exists rsync; then
+        rsync -aAX /etc/ "$BACKUP_DIR/etc/"
+    else
+        tar --xattrs --acls -cpf "$BACKUP_DIR/etc.tar" /etc
+    fi
+
+    cp -a /etc/apt/sources.list "$BACKUP_DIR/apt/" 2>/dev/null || true
+    cp -a /etc/apt/sources.list.d "$BACKUP_DIR/apt/" 2>/dev/null || true
+    cp -a /etc/update-manager/release-upgrades "$BACKUP_DIR/apt/" 2>/dev/null || true
+    cp -a /etc/ssh/sshd_config "$BACKUP_DIR/ssh/" 2>/dev/null || true
+    cp -a /etc/pam.d/sshd "$BACKUP_DIR/ssh/" 2>/dev/null || true
+
+    dpkg -l > "$BACKUP_DIR/state/dpkg-l.txt" || true
+    apt-mark showmanual > "$BACKUP_DIR/state/apt-manual-packages.txt" || true
+    snap list > "$BACKUP_DIR/state/snap-list.txt" 2>/dev/null || true
+    systemctl list-unit-files > "$BACKUP_DIR/state/systemd-unit-files.txt" || true
+    uname -a > "$BACKUP_DIR/state/uname.txt"
+    lsb_release -a > "$BACKUP_DIR/state/lsb_release.txt" 2>/dev/null || true
+}
+
+check_supported_os() {
+    local os_id version version_pretty
+    os_id="$(get_os_value ID)"
+    version="$(get_os_value VERSION)"
+    version_pretty="$(get_os_value PRETTY_NAME)"
+
+    info "Erkanntes System: ${version_pretty:-unbekannt}"
+
+    [[ "$os_id" == "ubuntu" ]] || die "$(msg not_ubuntu)"
+    [[ "$version" == *LTS* ]] || die "$(msg not_lts)"
+}
+
+check_current_version_window() {
+    local current_version
+    current_version="$(get_os_value VERSION_ID)"
+
+    if version_lt "$current_version" "24.04"; then
+        die "Dieses Skript ist für moderne LTS-Upgrades gedacht. Aktuelle Version ist $current_version; bitte zuerst auf 24.04 LTS gehen."
+    fi
+
+    if version_ge "$current_version" "$TARGET_LTS"; then
+        die "Aktuelle Version ist $current_version. Zielversion $TARGET_LTS ist damit nicht höher."
+    fi
+}
+
+check_disk_space() {
+    local root_free_gb boot_free_mb boot_mount
+
+    root_free_gb="$(df -BG / | awk 'NR==2 {gsub(/G/,"",$4); print $4}')"
+    [[ -n "$root_free_gb" ]] || die "Freien Speicher auf / konnte ich nicht ermitteln."
+
+    if (( root_free_gb < MIN_ROOT_FREE_GB )); then
+        die "Zu wenig freier Speicher auf /. Frei: ${root_free_gb}G, benötigt mindestens: ${MIN_ROOT_FREE_GB}G."
+    fi
+
+    if mountpoint -q /boot; then
+        boot_mount="/boot"
+    elif mountpoint -q /boot/efi; then
+        boot_mount="/boot/efi"
+    else
+        boot_mount=""
+    fi
+
+    if [[ -n "$boot_mount" ]]; then
+        boot_free_mb="$(df -BM "$boot_mount" | awk 'NR==2 {gsub(/M/,"",$4); print $4}')"
+        [[ -n "$boot_free_mb" ]] || die "Freien Speicher auf $boot_mount konnte ich nicht ermitteln."
+        if (( boot_free_mb < MIN_BOOT_FREE_MB )); then
+            die "Zu wenig freier Speicher auf $boot_mount. Frei: ${boot_free_mb}M, benötigt mindestens: ${MIN_BOOT_FREE_MB}M."
+        fi
+    fi
+
+    info "Freier Speicher: / = ${root_free_gb}G${boot_mount:+, $boot_mount = ${boot_free_mb}M}"
+}
+
+ensure_release_prompt_setting() {
+    local file="/etc/update-manager/release-upgrades"
+
+    [[ -f "$file" ]] || die "$file wurde nicht gefunden."
+
+    if grep -q '^Prompt=' "$file"; then
+        sed -i "s/^Prompt=.*/Prompt=${PROMPT_MODE}/" "$file"
+    else
+        printf '\nPrompt=%s\n' "$PROMPT_MODE" >> "$file"
+    fi
+
+    info "Prompt in $file wurde auf '$PROMPT_MODE' gesetzt."
+}
+
+inventory_third_party_repos() {
+    local outfile="$BACKUP_DIR/apt/third-party-repositories.txt"
+    local found=0
+
+    : > "$outfile"
+
+    if [[ -f /etc/apt/sources.list ]]; then
+        awk '
+            /^[[:space:]]*deb/ {
+                line=$0
+                if (line !~ /(archive\.ubuntu\.com|security\.ubuntu\.com|ports\.ubuntu\.com|esm\.ubuntu\.com|ubuntu\.com)/) {
+                    print "/etc/apt/sources.list: " line
+                }
+            }
+        ' /etc/apt/sources.list >> "$outfile"
+    fi
+
+    if compgen -G "/etc/apt/sources.list.d/*.list" > /dev/null; then
+        grep -RHIEn '^[[:space:]]*deb ' /etc/apt/sources.list.d/*.list \
+            | grep -Ev '(archive\.ubuntu\.com|security\.ubuntu\.com|ports\.ubuntu\.com|esm\.ubuntu\.com|ubuntu\.com)' \
+            >> "$outfile" || true
+    fi
+
+    if compgen -G "/etc/apt/sources.list.d/*.sources" > /dev/null; then
+        awk '
+            FNR==1 {file=FILENAME}
+            /^[[:space:]]*URIs:[[:space:]]*/ {
+                uri=$0
+                if (uri !~ /(archive\.ubuntu\.com|security\.ubuntu\.com|ports\.ubuntu\.com|esm\.ubuntu\.com|ubuntu\.com)/) {
+                    print file ": " uri
+                }
+            }
+        ' /etc/apt/sources.list.d/*.sources >> "$outfile" || true
+    fi
+
+    if [[ -s "$outfile" ]]; then
+        found=1
+        warn "$(msg third_party_found)"
+        warn "Liste gespeichert unter: $outfile"
+    else
+        info "Keine offensichtlichen Drittanbieter-Repositories gefunden."
+    fi
+
+    return "$found"
+}
+
+enforce_repo_policy() {
+    if inventory_third_party_repos; then
+        if [[ "$ALLOW_THIRD_PARTY" != "yes" ]]; then
+            die "Drittanbieter-Repositories gefunden. Für unattended Release-Upgrades wird standardmäßig abgebrochen. Override nur bewusst mit ALLOW_THIRD_PARTY=yes."
+        fi
+        warn "ALLOW_THIRD_PARTY=yes gesetzt. Fahre trotz Drittanbieter-Repositories fort."
+    fi
+}
+
+check_special_cases() {
+    local special_found=0
+
+    if package_installed rabbitmq-server; then
+        warn "RabbitMQ erkannt."
+        special_found=1
+    fi
+
+    if package_installed dovecot-core || package_installed dovecot-imapd || package_installed dovecot-pop3d; then
+        warn "Dovecot erkannt."
+        special_found=1
+    fi
+
+    if package_installed postfix; then
+        warn "Postfix erkannt. Nach dem Upgrade bitte die Paket-/Chroot-Konfiguration prüfen."
+    fi
+
+    if (( special_found == 1 )) && [[ "$ALLOW_SPECIAL_CASES" != "yes" ]]; then
+        die "Bekannter Sonderfall erkannt. Für unattended Release-Upgrades wird hier standardmäßig abgebrochen. Override nur bewusst mit ALLOW_SPECIAL_CASES=yes."
+    fi
+}
+
+verify_ssh_and_2fa_non_destructive() {
+    info "Prüfe SSH-/2FA-Konfiguration ohne Änderungen vorzunehmen ..."
+
+    if command_exists sshd; then
+        sshd -t
+        info "sshd -t erfolgreich."
+    else
+        warn "sshd wurde nicht gefunden; SSH-Konfiguration konnte nicht validiert werden."
+    fi
+
+    if package_installed libpam-google-authenticator; then
+        info "libpam-google-authenticator ist installiert."
+        if grep -q 'pam_google_authenticator.so' /etc/pam.d/sshd 2>/dev/null; then
+            info "PAM-Eintrag für Google Authenticator ist vorhanden."
+        else
+            warn "Paket vorhanden, aber kein pam_google_authenticator.so-Eintrag in /etc/pam.d/sshd gefunden."
+        fi
+    else
+        info "libpam-google-authenticator ist nicht installiert."
+    fi
+}
+
+backup_resolv_conf_state() {
+    if [[ -L /etc/resolv.conf ]]; then
+        readlink -f /etc/resolv.conf > "$BACKUP_DIR/dns/resolv.conf.symlink.target" || true
+    fi
+    cp -a /etc/resolv.conf "$BACKUP_DIR/dns/resolv.conf.before" 2>/dev/null || true
+
+    if systemctl list-unit-files | grep -q '^systemd-resolved.service'; then
+        systemctl is-enabled systemd-resolved > "$BACKUP_DIR/dns/systemd-resolved.enabled" 2>&1 || true
+        systemctl is-active systemd-resolved > "$BACKUP_DIR/dns/systemd-resolved.active" 2>&1 || true
+    fi
+}
+
+###############################################################################
+# Upgrade
+###############################################################################
+
+run_regular_updates() {
+    info "$(msg regular_updates)"
+
+    apt-get update -y
+    apt-get upgrade -y
+    apt-get dist-upgrade -y -o APT::Get::Always-Include-Phased-Updates=true
+    apt-get autoremove -y --purge
     apt-get clean
-    rm -rf /var/lib/apt/lists/*
-    log "$MSG_CLEANUP_DONE"
+
+    if [[ -f /run/reboot-required ]]; then
+        die "$(msg need_reboot_after_updates)"
+    fi
 }
 
-# Neustarten des Systems
-perform_reboot() {
-    log "$MSG_REBOOT"
-    sleep 10
-    reboot
+check_upgrade_offer() {
+    local args=(-c)
+    local rc
+
+    info "$(msg release_check)"
+
+    if [[ "$ALLOW_DEVEL_UPGRADE" == "yes" ]]; then
+        args+=(-d)
+        warn "Development-Upgrade ist aktiviert (-d)."
+    fi
+
+    set +e
+    LC_ALL=C do-release-upgrade "${args[@]}" > "$CHECK_RELEASE_FILE" 2>&1
+    rc=$?
+    set -e
+
+    tee -a "$LOGFILE" < "$CHECK_RELEASE_FILE" >/dev/null
+
+    if grep -Eq "New release ['\"]?${TARGET_LTS}['\"]? available" "$CHECK_RELEASE_FILE"; then
+        info "Zielrelease $TARGET_LTS wird offiziell angeboten."
+        return 0
+    fi
+
+    if grep -Eq 'No new release found|There is no development version of an LTS available' "$CHECK_RELEASE_FILE"; then
+        die "$(msg no_offer)"
+    fi
+
+    if (( rc != 0 )); then
+        die "Freigabeprüfung für das Release-Upgrade fehlgeschlagen. Ausgabe siehe: $CHECK_RELEASE_FILE"
+    fi
+
+    die "Konnte die do-release-upgrade-Ausgabe nicht eindeutig auf $TARGET_LTS verifizieren. Abbruch im unattended Modus."
 }
 
-# Hauptablauf
-main() {
-    log "$MSG_START"
-    configure_dpkg
+run_release_upgrade() {
+    local args=(-m server)
+    local view
+
+    if [[ "$UNATTENDED_MODE" == "yes" ]]; then
+        view="DistUpgradeViewNonInteractive"
+    else
+        view="DistUpgradeViewText"
+    fi
+
+    args+=(-f "$view")
+
+    if [[ "$ALLOW_DEVEL_UPGRADE" == "yes" ]]; then
+        args+=(-d)
+    fi
+
+    info "$(msg release_start)"
+    info "Verwende Upgrade-View: $view"
+
+    if command_exists script; then
+        script -q -e -c "LC_ALL=C do-release-upgrade ${args[*]}" "$TRANSCRIPT_FILE" | tee -a "$LOGFILE"
+    else
+        LC_ALL=C do-release-upgrade "${args[@]}" 2>&1 | tee -a "$LOGFILE"
+    fi
+
+    info "$(msg release_ok)"
+}
+
+###############################################################################
+# Optional: AdGuard
+###############################################################################
+
+adguard_container_exists() {
+    command_exists docker && docker ps -a --format '{{.Names}}' | grep -qx "$ADGUARD_CONTAINER_NAME"
+}
+
+manage_adguard_dns_after_upgrade() {
+    if [[ "$MANAGE_ADGUARD_DNS" != "yes" ]]; then
+        info "$(msg adguard_skip)"
+        return 0
+    fi
+
+    if ! adguard_container_exists; then
+        warn "AdGuard-Container '$ADGUARD_CONTAINER_NAME' wurde nicht gefunden. Überspringe DNS-Anpassung."
+        return 0
+    fi
+
+    info "Passe DNS/Resolver für AdGuard optional an ..."
+    backup_resolv_conf_state
+
+    if systemctl list-unit-files | grep -q '^systemd-resolved.service'; then
+        if systemctl is-enabled --quiet systemd-resolved || systemctl is-active --quiet systemd-resolved; then
+            info "Deaktiviere systemd-resolved, damit AdGuard Port 53 übernehmen kann."
+            systemctl stop systemd-resolved || true
+            systemctl disable systemd-resolved || true
+        fi
+    fi
+
+    if [[ -L /etc/resolv.conf ]]; then
+        rm -f /etc/resolv.conf
+    fi
+
+    cat > /etc/resolv.conf <<'INNEREOF3'
+# Statisch gesetzt vom Upgrade-Skript für AdGuard-Betrieb
+nameserver 9.9.9.9
+nameserver 1.1.1.1
+options timeout:2 attempts:2
+INNEREOF3
+    chmod 644 /etc/resolv.conf
+
+    info "Starte AdGuard-Container neu ..."
+    if docker ps --format '{{.Names}}' | grep -qx "$ADGUARD_CONTAINER_NAME"; then
+        docker restart "$ADGUARD_CONTAINER_NAME"
+    else
+        docker start "$ADGUARD_CONTAINER_NAME"
+    fi
+
+    info "AdGuard-/DNS-Anpassung abgeschlossen."
+}
+
+###############################################################################
+# Abschluss
+###############################################################################
+
+post_upgrade_cleanup() {
+    info "Bereinige Paketreste nach dem Upgrade ..."
+    apt-get autoremove -y --purge || true
+    apt-get clean || true
+
+    info "Sammle Post-Upgrade-Status ..."
+    uname -a > "$BACKUP_DIR/state/uname.after.txt" || true
+    lsb_release -a > "$BACKUP_DIR/state/lsb_release.after.txt" 2>/dev/null || true
+    dpkg -l > "$BACKUP_DIR/state/dpkg-l.after.txt" || true
+}
+
+maybe_reboot() {
+    if [[ "$AUTO_REBOOT" == "yes" ]]; then
+        info "AUTO_REBOOT=yes gesetzt. System wird neu gestartet."
+        reboot
+    fi
+
+    if [[ "$ASK_REBOOT" != "yes" ]]; then
+        info "Kein automatischer Neustart. Bitte manuell neu starten."
+        return 0
+    fi
+
+    if ask_yes_no_default_no "$(msg reboot_prompt)"; then
+        reboot
+    else
+        info "Kein automatischer Neustart. Bitte manuell neu starten."
+    fi
+}
+
+print_summary() {
+    local current_version pretty_name
+    current_version="$(get_os_value VERSION_ID)"
+    pretty_name="$(get_os_value PRETTY_NAME)"
+
+    info "Zusammenfassung:"
+    info "- System: ${pretty_name}"
+    info "- Aktuelle Version: ${current_version}"
+    info "- Zielversion: ${TARGET_LTS}"
+    info "- Prompt-Modus: ${PROMPT_MODE}"
+    info "- Development-Upgrade: ${ALLOW_DEVEL_UPGRADE}"
+    info "- Unattended-Modus: ${UNATTENDED_MODE}"
+    info "- Auto-Confirm: ${AUTO_CONFIRM}"
+    info "- Auto-Reboot: ${AUTO_REBOOT}"
+    info "- Ask-Reboot: ${ASK_REBOOT}"
+    info "- Allow Third Party: ${ALLOW_THIRD_PARTY}"
+    info "- Allow Special Cases: ${ALLOW_SPECIAL_CASES}"
+    info "- AdGuard/DNS automatisch anpassen: ${MANAGE_ADGUARD_DNS}"
+    info "- Backup-Verzeichnis: ${BACKUP_DIR}"
+    info "- Hauptlog: ${LOGFILE}"
+}
+
+preflight_checks() {
+    info "$(msg preflight)"
+    check_supported_os
+    check_current_version_window
+    ensure_required_packages
+    create_backup_dir
     backup_configs
-    handle_adguard
-    ensure_2fa
-    perform_regular_updates
-    perform_release_upgrade
-    fix_adguard_after_upgrade
-    cleanup
-    perform_reboot
+    configure_unattended_mode
+    check_disk_space
+    ensure_release_prompt_setting
+    enforce_repo_policy
+    check_special_cases
+    verify_ssh_and_2fa_non_destructive
+    backup_resolv_conf_state
+    print_summary
 }
 
-main
+main() {
+    choose_language
+    require_root
+    init_logging
+    info "$(msg start)"
+
+    preflight_checks
+
+    if ! confirm_or_die "Möchtest du fortfahren?"; then
+        die "Abbruch auf Benutzerwunsch."
+    fi
+
+    run_regular_updates
+    check_upgrade_offer
+    run_release_upgrade
+    manage_adguard_dns_after_upgrade
+    post_upgrade_cleanup
+
+    info "Alle Schritte abgeschlossen. Zusätzliche Upgrade-Logs liegen typischerweise unter /var/log/dist-upgrade/."
+    maybe_reboot
+}
+
+main "$@"
