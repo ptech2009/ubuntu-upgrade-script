@@ -1,122 +1,168 @@
-# Ubuntu-upgrade-script
-A script to streamline and automate the upgrade process of Ubuntu systems.
+# Ubuntu LTS Upgrade Script
 
-This script performs a fully automated upgrade of an Ubuntu server to the next LTS version without requiring manual interaction. It is designed for administrators who wish to streamline and simplify their upgrade process. Key features include:
+A Bash script for fully automated, safe Ubuntu LTS release upgrades without manual interaction.
 
-- Creating a full backup of the `/etc` configuration directory.
-- Configuring `dpkg` for automatic merging of configuration files.
-- Running comprehensive system updates (`apt-get update`, `upgrade`, `dist-upgrade`, `autoremove`).
-- Performing the release upgrade to the next Ubuntu LTS version using `do-release-upgrade`.
-- Cleaning up temporary files after the upgrade.
-- Automatically rebooting the system upon completion.
+---
 
-The script also detects and adjusts for optional components as needed:
+## Description
 
-- **AdGuard Home on Port 53:**  
-  If a Docker container named `adguardhome` is present, the script ensures that port 53 is made available, `systemd-resolved` is disabled, and AdGuard Home is restarted after the upgrade.
+This script is aimed at administrators who want to standardize and simplify their upgrade process on Ubuntu servers. It relies on `do-release-upgrade`, automatically answers standard prompts, and deliberately aborts on known risk cases – no blind `yes | ...`.
 
-- **2FA via Google Authenticator:**  
-  If `libpam-google-authenticator` is installed, the script ensures that two-factor authentication for SSH is properly configured.
+### Key Features
 
-Other Docker containers (e.g., Nextcloud, Vaultwarden, Portainer) are not modified and remain unaffected by the script’s actions.
+- **Language selection:** English and German are supported; in non-interactive mode, German is selected automatically.
+- **Preflight checks:** Verification of the operating system (Ubuntu LTS only), current version, available disk space (default: 6 GB on `/`, 200 MB on `/boot`), APT sources for third-party repositories, and known special cases (RabbitMQ, Dovecot, Postfix).
+- **Comprehensive backup:** Saves `/etc`, APT sources, SSH configuration, system information, and DNS state before the upgrade.
+- **Unattended mode:** Automatic configuration of `dpkg`, `needrestart`, `debconf`, and `apt` for fully non-interactive upgrades.
+- **System updates:** Full package update (`update`, `upgrade`, `dist-upgrade`, `autoremove`) before the release upgrade.
+- **Release verification:** Checks whether the target release is officially offered via `do-release-upgrade` – no blind upgrades to unreleased versions.
+- **Release upgrade:** Runs `do-release-upgrade` with full session transcript logging.
+- **Post-upgrade cleanup:** Removes package leftovers and captures system state after the upgrade.
+- **Reboot control:** Configurable automatic or interactive reboot behavior.
+
+### Optional: AdGuard Home / DNS
+
+When `MANAGE_ADGUARD_DNS=yes` is set and a Docker container with the configured name exists, the script ensures that:
+
+- `systemd-resolved` is disabled so AdGuard can take over port 53,
+- `/etc/resolv.conf` is set statically to safe DNS servers,
+- the AdGuard container is restarted after the upgrade.
+
+Other Docker containers (e.g. Nextcloud, Vaultwarden, Portainer) are not modified.
+
+### Optional: 2FA with Google Authenticator
+
+If `libpam-google-authenticator` is installed, the script **non-destructively** checks whether the PAM entry for SSH is correctly present, and issues a warning if not.
+
+---
 
 ## Requirements
 
-- An Ubuntu LTS server (e.g., Ubuntu 20.04) that can be upgraded to the next LTS version (e.g., 22.04).
-- `do-release-upgrade` should be available (commonly included in the `ubuntu-release-upgrader-core` package).
-- The script must be run as `root`.
+- Ubuntu LTS server running **24.04 or later**, to be upgraded to the next LTS version (default: 26.04).
+- `do-release-upgrade` must be available (package: `ubuntu-release-upgrader-core`); missing helper packages are installed automatically.
+- The script must be run as **root**.
+
+---
+
+## Configuration
+
+The script is fully controlled via environment variables – no changes to the script itself are necessary:
+
+| Variable | Default | Description |
+|---|---|---|
+| `TARGET_LTS` | `26.04` | Target LTS version |
+| `PROMPT_MODE` | `lts` | Release upgrade mode (`lts` or `normal`) |
+| `ALLOW_DEVEL_UPGRADE` | `no` | Allow development release upgrade (`yes`/`no`) |
+| `UNATTENDED_MODE` | `yes` | Fully automatic mode (`yes`/`no`) |
+| `AUTO_CONFIRM` | `yes` | Automatically confirm prompts (`yes`/`no`) |
+| `AUTO_REBOOT` | `no` | Automatic reboot after upgrade (`yes`/`no`) |
+| `ASK_REBOOT` | `no` | Ask interactively whether to reboot (`yes`/`no`) |
+| `ALLOW_THIRD_PARTY` | `no` | Allow third-party repositories (`yes`/`no`) |
+| `ALLOW_SPECIAL_CASES` | `no` | Allow known special cases (RabbitMQ, Dovecot) (`yes`/`no`) |
+| `MANAGE_ADGUARD_DNS` | `no` | Enable AdGuard/DNS management (`yes`/`no`) |
+| `ADGUARD_CONTAINER_NAME` | `adguardhome` | Name of the AdGuard Docker container |
+| `MIN_ROOT_FREE_GB` | `6` | Minimum free space on `/` in GB |
+| `MIN_BOOT_FREE_MB` | `200` | Minimum free space on `/boot` in MB |
+| `LOGFILE` | `/var/log/ubuntu-lts-upgrade.log` | Path to the log file |
+| `BACKUP_DIR` | `/root/ubuntu_upgrade_backup_DATE` | Path to the backup directory |
+| `LANGUAGE` | `de` | Default language (`de`/`en`) |
+| `LANGUAGE_CHOICE` | *(empty)* | Override language without interactive prompt |
+
+### Example with custom variables
+
+```bash
+TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./upgrade-script.sh
+```
+
+---
 
 ## Usage
 
-1. Download or create the script locally:
+1. Download the script:
    ```bash
    wget https://raw.githubusercontent.com/your-username/your-repo/main/upgrade-script.sh
    chmod +x upgrade-script.sh
+   ```
 
-    Run the script as root:
-
-    sudo ./upgrade-script.sh
-
-    The script will perform all necessary steps automatically. No further input is required.
-
-Logging & Troubleshooting
-
-    All actions are logged to /var/log/ubuntu-lts-upgrade.log.
-    In case of errors or issues, consult this log file to review the upgrade process and identify potential problems.
-
-Customization
-
-The script is modular and can be easily adjusted. If you prefer not to disable systemd-resolved or do not wish to configure 2FA, feel free to comment out or remove the relevant sections. Review the function blocks for tailoring the script to your specific environment.
-Disclaimer
-
-Use this script at your own risk. It is highly recommended to perform a full system backup before initiating the upgrade.
-
-✉️ Contact
-
-For questions or suggestions, feel free to open a GitHub Issue or send an email to ptech09@schumacher.or.at.
-
-License
-
-This project is licensed under the MIT License. Please refer to the LICENSE file for more details.
-
-
-
-# Ubuntu LTS Upgrade Skript
-
-Dieses Skript führt ein vollautomatisiertes Upgrade eines Ubuntu-Servers auf die nächste LTS-Version durch, ohne dass manuelle Eingriffe erforderlich sind. Es richtet sich an Administratoren, die ihren Upgrade-Prozess vereinfachen und standardisieren möchten. Wesentliche Funktionen sind:
-
-- Erstellen eines vollständigen Backups des `/etc`-Verzeichnisses.
-- Konfiguration von `dpkg` für das automatische Zusammenführen von Konfigurationsdateien.
-- Ausführen umfangreicher System-Updates (`apt-get update`, `upgrade`, `dist-upgrade`, `autoremove`).
-- Durchführung des Release-Upgrades auf die nächste Ubuntu LTS-Version mittels `do-release-upgrade`.
-- Bereinigung temporärer Dateien nach dem Upgrade.
-- Automatischer Neustart des Systems nach Abschluss.
-
-Das Skript erkennt optional vorhandene Komponenten und passt das Vorgehen entsprechend an:
-
-- **AdGuard Home auf Port 53:**  
-  Ist ein Docker-Container mit dem Namen `adguardhome` vorhanden, sorgt das Skript dafür, dass Port 53 freigegeben, `systemd-resolved` deaktiviert und AdGuard Home nach dem Upgrade neu gestartet wird.
-
-- **2FA mit Google Authenticator:**  
-  Ist das Paket `libpam-google-authenticator` installiert, stellt das Skript sicher, dass die Zwei-Faktor-Authentifizierung für SSH korrekt eingerichtet ist.
-
-Andere Docker-Container (z. B. Nextcloud, Vaultwarden, Portainer) werden nicht verändert und bleiben von den Aktionen des Skripts unberührt.
-
-## Voraussetzungen
-
-- Ein Ubuntu LTS-Server (z. B. Ubuntu 20.04), der auf die nächste LTS-Version (z. B. 22.04) aktualisiert werden kann.
-- `do-release-upgrade` sollte verfügbar sein (in der Regel im Paket `ubuntu-release-upgrader-core` enthalten).
-- Das Skript muss als `root` ausgeführt werden.
-
-## Verwendung
-
-1. Skript herunterladen oder lokal erstellen:
+2. Run as root:
    ```bash
-   wget https://raw.githubusercontent.com/dein-benutzername/dein-repo/main/upgrade-script.sh
-   chmod +x upgrade-script.sh
+   sudo ./upgrade-script.sh
+   ```
 
-    Als root ausführen:
+The script performs all steps automatically. With `UNATTENDED_MODE=yes` (default), no further interaction is required.
 
-    sudo ./upgrade-script.sh
+---
 
-    Das Skript führt alle erforderlichen Schritte automatisch durch. Kein weiterer Eingriff ist nötig.
+## Process Overview
 
-Logging & Fehlersuche
+1. Language selection (interactive or automatic)
+2. Root check
+3. Initialize logging
+4. **Preflight checks:**
+   - OS and LTS verification
+   - Version range check (≥ 24.04, < target version)
+   - Install missing helper packages
+   - Create backup (`/etc`, APT, SSH, system state, DNS)
+   - Configure unattended mode
+   - Check available disk space
+   - Set release prompt
+   - Inventory third-party repositories and enforce policy
+   - Check for known special cases
+   - Non-destructively verify SSH and 2FA configuration
+   - Print summary
+5. Request confirmation (or proceed automatically)
+6. Install all pending package updates
+7. Verify release availability via `do-release-upgrade -c`
+8. Run release upgrade (with session transcript)
+9. AdGuard/DNS adjustment (optional)
+10. Post-upgrade cleanup and state snapshot
+11. Reboot (automatic, interactive, or manual)
 
-    Alle Aktionen werden in /var/log/ubuntu-lts-upgrade.log protokolliert.
-    Im Fehlerfall oder bei Problemen kann diese Logdatei zur Fehlersuche herangezogen werden.
+---
 
-Anpassungen
+## Logging & Troubleshooting
 
-Das Skript ist modular aufgebaut und kann leicht angepasst werden. Wenn Du z. B. systemd-resolved nicht deaktivieren oder keine 2FA einrichten möchtest, kannst Du die entsprechenden Abschnitte auskommentieren oder entfernen. Überprüfe die Funktionsblöcke, um das Skript an Deine Umgebung anzupassen.
-Haftungsausschluss
+- All actions are logged to `/var/log/ubuntu-lts-upgrade.log`.
+- The complete `do-release-upgrade` session transcript is saved as `do-release-upgrade.session.log` in the backup directory.
+- Additional Ubuntu upgrade logs are typically found under `/var/log/dist-upgrade/`.
+- The backup directory contains before/after snapshots of `dpkg -l`, `lsb_release`, and other system state information.
 
-Die Verwendung des Skripts erfolgt auf eigene Gefahr. Es wird dringend empfohlen, vor dem Upgrade ein vollständiges Backup des Systems anzufertigen.
+---
 
-✉️ Kontakt
+## Safety & Error Protection
 
-Bei Fragen oder Anregungen kannst Du gerne ein GitHub Issue eröffnen oder eine E-Mail an ptech09@schumacher.or.at senden.
+- The script uses `set -Eeuo pipefail` and `umask 077`.
+- Errors are logged with line number and command; temporary configuration files are automatically removed on exit.
+- Third-party repositories cause an abort by default (`ALLOW_THIRD_PARTY=no`).
+- Known special cases (RabbitMQ, Dovecot) cause an abort by default (`ALLOW_SPECIAL_CASES=no`).
+- Reboot requirements after regular updates are detected and result in a controlled abort with instructions.
+- The upgrade command itself is never called with `yes |`.
 
-Lizenz
+---
 
-Dieses Projekt steht unter der MIT-Lizenz. Weitere Informationen findest Du in der LICENSE-Datei.
+## Customization
+
+The script is modular in design. Individual function blocks can be commented out or removed as needed:
+
+- `manage_adguard_dns_after_upgrade` – AdGuard/DNS adjustment
+- `verify_ssh_and_2fa_non_destructive` – SSH and 2FA verification
+- `check_special_cases` – Detection of RabbitMQ, Dovecot, Postfix
+- `enforce_repo_policy` – Third-party repository policy
+
+---
+
+## Disclaimer
+
+Use this script at your own risk. It is strongly recommended to perform a full system backup before initiating the upgrade. The script creates a configuration backup on its own, but this does not replace a full system backup.
+
+---
+
+## License
+
+This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+
+---
+
+## Contact
+
+For questions or suggestions, feel free to open a [GitHub Issue](../../issues) or send an email to [ptech09@schumacher.or.at](mailto:ptech09@schumacher.or.at).
