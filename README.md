@@ -1,5 +1,8 @@
 # Ubuntu LTS Upgrade Script
 
+[![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)](CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A Bash script for fully automated, safe Ubuntu LTS release upgrades without manual interaction.
 
 ---
@@ -71,7 +74,7 @@ The script is fully controlled via environment variables – no changes to the s
 ### Example with custom variables
 
 ```bash
-TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./upgrade-script.sh
+TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./ubuntu-upgrade-script
 ```
 
 ---
@@ -80,13 +83,13 @@ TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./upgrade-script.sh
 
 1. Download the script:
    ```bash
-   wget https://raw.githubusercontent.com/your-username/your-repo/main/upgrade-script.sh
-   chmod +x upgrade-script.sh
+   wget https://raw.githubusercontent.com/ptech2009/ubuntu-upgrade-script/main/ubuntu-upgrade-script
+   chmod +x ubuntu-upgrade-script
    ```
 
 2. Run as root:
    ```bash
-   sudo ./upgrade-script.sh
+   sudo ./ubuntu-upgrade-script
    ```
 
 The script performs all steps automatically. With `UNATTENDED_MODE=yes` (default), no further interaction is required.
@@ -160,6 +163,10 @@ Use this script at your own risk. It is strongly recommended to perform a full s
 ## License
 
 This project is licensed under the **MIT License**. See the `LICENSE` file for details.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ---
 

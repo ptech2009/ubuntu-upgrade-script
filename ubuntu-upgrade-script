@@ -15,6 +15,7 @@ umask 077
 # - kein blindes "yes | ..."
 ###############################################################################
 
+SCRIPT_VERSION="2.0.1"
 TARGET_LTS="${TARGET_LTS:-26.04}"
 PROMPT_MODE="${PROMPT_MODE:-lts}"                        # lts | normal
 ALLOW_DEVEL_UPGRADE="${ALLOW_DEVEL_UPGRADE:-no}"        # yes | no
@@ -697,6 +698,7 @@ print_summary() {
 
     info "Zusammenfassung:"
     info "- System: ${pretty_name}"
+    info "- Script-Version: ${SCRIPT_VERSION}"
     info "- Aktuelle Version: ${current_version}"
     info "- Zielversion: ${TARGET_LTS}"
     info "- Prompt-Modus: ${PROMPT_MODE}"

@@ -1,5 +1,8 @@
 # Ubuntu LTS Upgrade Skript
 
+[![Version](https://img.shields.io/badge/version-2.0.1-blue.svg)](CHANGELOG.md)
+[![Lizenz: MIT](https://img.shields.io/badge/Lizenz-MIT-yellow.svg)](LICENSE)
+
 Ein Bash-Skript für vollautomatisierte, sichere Ubuntu-LTS-Release-Upgrades ohne manuelle Eingriffe.
 
 ---
@@ -71,7 +74,7 @@ Das Skript ist vollständig über Umgebungsvariablen steuerbar – keine Änderu
 ### Beispiel mit überschriebenen Variablen
 
 ```bash
-TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./upgrade-script.sh
+TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./ubuntu-upgrade-script
 ```
 
 ---
@@ -80,13 +83,13 @@ TARGET_LTS=26.04 AUTO_REBOOT=yes MANAGE_ADGUARD_DNS=yes sudo ./upgrade-script.sh
 
 1. Skript herunterladen:
    ```bash
-   wget https://raw.githubusercontent.com/dein-benutzername/dein-repo/main/upgrade-script.sh
-   chmod +x upgrade-script.sh
+   wget https://raw.githubusercontent.com/ptech2009/ubuntu-upgrade-script/main/ubuntu-upgrade-script
+   chmod +x ubuntu-upgrade-script
    ```
 
 2. Als root ausführen:
    ```bash
-   sudo ./upgrade-script.sh
+   sudo ./ubuntu-upgrade-script
    ```
 
 Das Skript führt alle Schritte automatisch durch. Bei `UNATTENDED_MODE=yes` (Standard) ist kein weiterer Eingriff erforderlich.
@@ -160,6 +163,10 @@ Die Verwendung des Skripts erfolgt auf eigene Gefahr. Es wird dringend empfohlen
 ## Lizenz
 
 Dieses Projekt steht unter der **MIT-Lizenz**. Weitere Informationen findest Du in der `LICENSE`-Datei.
+
+## Changelog
+
+Siehe [CHANGELOG.md](CHANGELOG.md) für Release-Notes.
 
 ---
 
